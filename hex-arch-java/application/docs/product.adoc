@@ -1,0 +1,83 @@
+:source-highlighter: highlight.js
+
+In the application/hexagonal layer we implement the ports and domain service.  We implement the use case "Searching for products". We conform to the Single Responsibility Principle and will create a separate port and service class for each use case.
+
+The primary port will have a UseCase suffix.
+
+The secondary ports are repositories and therefore related to persistence.
+
+TODO: Embed UML diagram from PlanetUML
+
+The application module needs access to the model module and so we add the following dependency.
+
+[,xml]
+----
+        <dependency>
+            <groupId>com.example.shop</groupId>
+            <artifactId>model</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+
+
+----
+
+The 'Searching for Products' Use Case description is:
+The customer should be able to enter a text in a search field.  The search should be at lease two characters long.  The search should return all products where the search text appears in the title or description.
+
+Our first primary port is FindProductsUseCase
+
+[,java]
+----
+public interface FindProductsUseCase {
+
+  List<Product> findByNameOrDescription(String query);
+}
+
+
+----
+
+The port is implemented by the FindProductsService class.  This service accessing the secondary port ProductRepository in order to search for the products in the deployed persistence solution.
+
+We pass the port's implementation to the services' constructor using "constructor dependency injection" via the bootstrap module.
+
+[,java]
+----
+public class FindProductsService implements FindProductsUseCase {
+
+  private final ProductRepository productRepository;
+
+  public FindProductsService(ProductRepository productRepository) {
+    this.productRepository = productRepository;
+  }
+
+  @Override
+  public List<Product> findByNameOrDescription(String query) {
+    Objects.requireNonNull(query, "'query' must not be null");
+    if (query.length() < 2) {
+      throw new IllegalArgumentException("'query' must be at least two characters long");
+    }
+
+    return productRepository.findByNameOrDescription(query);
+  }
+}
+
+
+
+----
+
+Here one witnesses the ProductRepository which is injected.
+
+[,java]
+----
+public interface ProductRepository {
+
+  List<Product> findByNameOrDescription(String query);
+}
+
+This completes the Use Case from the application's hexagonal perspective.  How the products are searched for in the persistence solution resides with the implementation of the adapter that will implement the secondary port referred to as ProduceRepository.
+
+
+
+
+----
