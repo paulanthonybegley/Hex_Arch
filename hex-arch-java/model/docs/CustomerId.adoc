@@ -1,0 +1,29 @@
+:source-highlighter: highlight.js
+
+The CustomerId is implemented as a record in order to make it immutable.  It acts as a wrapper around the primitive int style, this allows use to impart the semantics as being different to a primitive int.  
+
+[,java]
+----
+package com.example.shop.model.customer;
+
+/**
+ * A customer ID value object (enabling type-safety and validation).
+ *
+ * @author Paul Anthony Begley
+ */
+public record CustomerId(int value) {
+
+  public CustomerId {
+    if (value < 1) {
+      throw new IllegalArgumentException("'value' must be a positive integer");
+    }
+  }
+}
+
+
+----
+
+This approach gives two advantages:
+
+1. We can ensure the CustomerId is valid as to Business rules.
+2. We can pass customer id in a type safe way.  If it were int then easy to accidentally swap arguments to a method/function taking multiple int parameters.
