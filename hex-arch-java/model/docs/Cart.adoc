@@ -1,0 +1,207 @@
+:source-highlighter: highlight.js
+
+The quantity can change in the CartLineItem so it is not a record but a class with Lombok annotations.  Notice the use of @Getter and not @Data.  The only field to be changed is quantity and this is orchestrated by the method increaseQuantityBy, encapsulation and domain ubiquitous language.
+
+[,java]
+----
+@Getter
+@Accessors(fluent = true)
+@RequiredArgsConstructor
+@AllArgsConstructor
+public class CartLineItem {
+
+  private final Product product;
+  private int quantity;
+
+  public void increaseQuantityBy(int augend, int itemsInStock)
+      throws NotEnoughItemsInStockException {
+    if (augend < 1) {
+      throw new IllegalArgumentException("You must add at least one item");
+    }
+
+    int newQuantity = quantity + augend;
+    if (itemsInStock < newQuantity) {
+      throw new NotEnoughItemsInStockException(
+          "Product %s has less items in stock (%d) than the requested total quantity (%d)"
+              .formatted(product.id(), product.itemsInStock(), newQuantity),
+          product.itemsInStock());
+    }
+
+    this.quantity = newQuantity;
+  }
+
+  public Money subTotal() {
+    return product.price().multiply(quantity);
+  }
+}
+
+----
+
+The business logic of increasing the quantity is inplemented here in Cart making this a "Rich Domain Model".  If the logic would be moved to a service layer that this would become an "Anemic Domain Model".
+
+The method increaseQuantityBy method also checks the pre- and postconditions.  If the preconditions fails, the number to be added is less than one, the method throws an IllegalArgumentException as it should not be possible to call the method with too low a number.
+
+If the postcondition fails, the cart must not contain more than available items, the method throws a NotEnoughItemsInStockException.  This exception includes the available quantity as a parameter so that a corresponding message can be shown in the frontend.
+
+[,java]
+----
+public class NotEnoughItemsInStockException extends Exception {
+
+    private final int itemsInStock;
+  
+    public NotEnoughItemsInStockException(String message, int itemsInStock) {
+      super(message);
+      this.itemsInStock = itemsInStock;
+    }
+  
+    public int itemsInStock() {
+      return itemsInStock;
+    }
+  }
+
+----
+
+The Cart class is the core of the model and stores shopping cart entries in a map from ProductId to CartLineItem.  When we add a product using the addProduct method then we check if the cart already has it.
+
+The method lineItems returns a copy of the values in the map so that the lineItems data structure cannot be changed for outside the class.
+
+[,java]
+----
+@Accessors(fluent = true)
+@RequiredArgsConstructor
+public class Cart {
+
+  @Getter private final CustomerId id; // cart ID = customer ID
+
+  private final Map<ProductId, CartLineItem> lineItems = new LinkedHashMap<>();
+
+  public void addProduct(Product product, int quantity) throws NotEnoughItemsInStockException {
+    lineItems
+        .computeIfAbsent(product.id(), ignored -> new CartLineItem(product))
+        .increaseQuantityBy(quantity, product.itemsInStock());
+  }
+
+  public List<CartLineItem> lineItems() {
+    return List.copyOf(lineItems.values());
+  }
+
+  public int numberOfItems() {
+    return lineItems.values().stream().mapToInt(CartLineItem::quantity).sum();
+  }
+
+  public Money subTotal() {
+    return lineItems.values().stream().map(CartLineItem::subTotal).reduce(Money::add).orElse(null);
+  }
+}
+
+----
+
+In order to implement the CartTest then the following dependencies needed to be added.
+
+[,xml]
+----
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>5.10.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>3.24.2</version>
+            <scope>test</scope>
+        </dependency>
+
+
+
+----
+
+The CartTest class tests the Cart class in the previous section.
+
+[,java]
+----
+class CartTest {
+
+  @Test
+  void givenEmptyCart_addTwoProducts_productsAreInCart() throws NotEnoughItemsInStockException {
+    Cart cart = emptyCartForRandomCustomer();
+
+    Product product1 = TestProductFactory.createTestProduct(euros(12, 99));
+    Product product2 = TestProductFactory.createTestProduct(euros(5, 97));
+
+    cart.addProduct(product1, 3);
+    cart.addProduct(product2, 5);
+
+    assertThat(cart.lineItems()).hasSize(2);
+    assertThat(cart.lineItems().get(0).product()).isEqualTo(product1);
+    assertThat(cart.lineItems().get(0).quantity()).isEqualTo(3);
+    assertThat(cart.lineItems().get(1).product()).isEqualTo(product2);
+    assertThat(cart.lineItems().get(1).quantity()).isEqualTo(5);
+  }
+
+  @Test
+  void givenEmptyCart_addTwoProducts_numberOfItemsAndSubTotalIsCalculatedCorrectly()
+      throws NotEnoughItemsInStockException {
+    Cart cart = emptyCartForRandomCustomer();
+
+    Product product1 = TestProductFactory.createTestProduct(euros(12, 99));
+    Product product2 = TestProductFactory.createTestProduct(euros(5, 97));
+
+    cart.addProduct(product1, 3);
+    cart.addProduct(product2, 5);
+
+    assertThat(cart.numberOfItems()).isEqualTo(8);
+    assertThat(cart.subTotal()).isEqualTo(euros(68, 82));
+  }
+
+  @Test
+  void givenAProductWithAFewItemsAvailable_addMoreItemsThanAvailableToTheCart_throwsException() {
+    Cart cart = emptyCartForRandomCustomer();
+    Product product = TestProductFactory.createTestProduct(euros(9, 97), 3);
+
+    ThrowingCallable invocation = () -> cart.addProduct(product, 4);
+
+    assertThatExceptionOfType(NotEnoughItemsInStockException.class)
+        .isThrownBy(invocation)
+        .satisfies(ex -> assertThat(ex.itemsInStock()).isEqualTo(product.itemsInStock()));
+  }
+
+  @Test
+  void givenAProductWithAFewItemsAvailable_addAllAvailableItemsToTheCart_succeeds() {
+    Cart cart = emptyCartForRandomCustomer();
+    Product product = TestProductFactory.createTestProduct(euros(9, 97), 3);
+
+    ThrowingCallable invocation = () -> cart.addProduct(product, 3);
+
+    assertThatNoException().isThrownBy(invocation);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {-100, -1, 0})
+  void givenEmptyCart_addLessThanOneItemOfAProduct_throwsException(int quantity) {
+    Cart cart = emptyCartForRandomCustomer();
+    Product product = TestProductFactory.createTestProduct(euros(1, 49));
+
+    ThrowingCallable invocation = () -> cart.addProduct(product, quantity);
+
+    assertThatIllegalArgumentException().isThrownBy(invocation);
+  }
+}
+
+
+----
+
+The test generates an empty shopping cart via TestCartFactory and two products at 12.99 euro and 5.97 euro via TesTProductFactory and TestMoneyFactory, then adds product one to the cart three times and product two five times and finally verifies that the cart contains a total of eight products for a total of 68.82 euro.
+
+[,java]
+----
+public class TestCartFactory {
+
+  public static Cart emptyCartForRandomCustomer() {
+    return new Cart(new CustomerId(ThreadLocalRandom.current().nextInt(1_000_000)));
+  }
+}
+
+
+----
