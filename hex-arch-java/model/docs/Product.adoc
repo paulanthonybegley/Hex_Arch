@@ -1,0 +1,67 @@
+:source-highlighter: highlight.js
+
+
+The ProductId class is a wrapper around a string and provides a static method ro a random product id.  This again gives benefits of avoiding "primitive obsession".  The semantics of a ProductId are not the same as a primitive string.
+
+[,java]
+----
+public record ProductId(String value) {
+
+  private static final String ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  private static final int LENGTH_OF_NEW_PRODUCT_IDS = 8;
+
+  public ProductId {
+    Objects.requireNonNull(value, "'value' must not be null");
+    if (value.isEmpty()) {
+      throw new IllegalArgumentException("'value' must not be empty");
+    }
+  }
+
+  public static ProductId randomProductId() { <1>
+    ThreadLocalRandom random = ThreadLocalRandom.current();
+    char[] chars = new char[LENGTH_OF_NEW_PRODUCT_IDS];
+    for (int i = 0; i < LENGTH_OF_NEW_PRODUCT_IDS; i++) {
+      chars[i] = ALPHABET.charAt(random.nextInt(ALPHABET.length()));
+    }
+    return new ProductId(new String(chars));
+  }
+}
+
+----
+<1> The randomProductId method will be used in unit tests and to generate demo products
+
+The seller should be able to change th description and price of a product.  Hence it is mutable. It therefore cannot be implemented as a record.
+
+We avoid writing Getters and Setters for the Product class by using Lombok annotations.  The dependency for the Lombok library is placed in the root pom.xml.
+
+[,xml]
+----
+    <!-- Provided scope (shared by all modules) -->
+    <dependency>
+        <groupId>org.projectlombok</groupId>
+        <artifactId>lombok</artifactId>
+        <version>1.18.30</version>
+        <scope>provided</scope>
+    </dependency>
+
+----
+
+Now it is possible to implement the Product class.
+
+[,java]
+----
+@Data
+@Accessors(fluent = true)
+@AllArgsConstructor
+public class Product {
+
+  private final ProductId id;
+  private String name;
+  private String description;
+  private Money price;
+  private int itemsInStock;
+}
+
+
+
+----
