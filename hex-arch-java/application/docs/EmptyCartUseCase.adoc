@@ -1,0 +1,79 @@
+:source-highlighter: highlight.js
+
+The description of the Emptying the shopping cart is as follow:  The customer should be able to empty their shopping cart.
+
+The primary port is EmptyCartUseCase
+[,java]
+----
+public interface EmptyCartUseCase {
+
+  void emptyCart(CustomerId customerId);
+}
+
+----
+
+Its implementation is EmptyCartService.  A shopping cart is emptied by deleting it.  When the user queries it again then it just returns a new empty cart object.
+
+[,java]
+----
+import com.example.shop.application.port.in.cart.EmptyCartUseCase;
+import com.example.shop.application.port.out.persistence.CartRepository;
+import com.example.shop.model.customer.CustomerId;
+import java.util.Objects;
+
+public class EmptyCartService implements EmptyCartUseCase {
+
+  private final CartRepository cartRepository;
+
+  public EmptyCartService(CartRepository cartRepository) {
+    this.cartRepository = cartRepository;
+  }
+
+  @Override
+  public void emptyCart(CustomerId customerId) {
+    Objects.requireNonNull(customerId, "'customerId' must not be null");
+
+    cartRepository.deleteByCustomerId(customerId);
+  }
+}
+
+----
+
+Finally, for this use case we enhance the secondary port called CartRepository with a new method called deleteById.
+
+[,java]
+----
+public interface CartRepository {
+
+  void save(Cart cart);
+
+  Optional<Cart> findByCustomerId(CustomerId customerId);
+
+  void deleteByCustomerId(CustomerId customerId);
+}
+
+----
+
+The unit test for the Empty cart use case is in EmptyCartServiceTest.
+
+[,java]
+----
+class EmptyCartServiceTest {
+
+  private static final CustomerId TEST_CUSTOMER_ID = new CustomerId(61157);
+
+  private final CartRepository cartRepository = mock(CartRepository.class);
+  private final EmptyCartService emptyCartService = new EmptyCartService(cartRepository);
+
+  @Test
+  void emptyCart_invokesDeleteOnThePersistencePort() {
+    emptyCartService.emptyCart(TEST_CUSTOMER_ID);
+
+    verify(cartRepository).deleteByCustomerId(TEST_CUSTOMER_ID);
+  }
+}
+
+
+----
+
+
