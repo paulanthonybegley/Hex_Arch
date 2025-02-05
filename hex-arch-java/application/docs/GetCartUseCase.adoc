@@ -1,0 +1,64 @@
+:source-highlighter: highlight.js
+
+The customer should be able to retrieve their shopping cart, including the products, their respective quantity, the total number of products, and the total price
+
+The primary port is GetCartUseCase:
+
+[,java]
+----
+package com.example.shop.application.port.in.cart;
+
+import com.example.shop.model.cart.Cart;
+import com.example.shop.model.customer.CustomerId;
+
+/**
+ * Use case: Retrieving a shopping cart.
+ *
+ * @author Paul Anthony Begley
+ */
+public interface GetCartUseCase {
+
+  Cart getCart(CustomerId customerId);
+}
+
+----
+
+The implementation of above port is GetCartService which forwards the call to the repository method findByCustomerId, which was created in the previous use case.  In shopping cart exists then a ew one is created so this method never returns null.
+
+[,java]
+----
+public class GetCartService implements GetCartUseCase {
+
+  private final CartRepository cartRepository;
+
+  public GetCartService(CartRepository cartRepository) {
+    this.cartRepository = cartRepository;
+  }
+
+  @Override
+  public Cart getCart(CustomerId customerIdVeryLong) {
+    Objects.requireNonNull(customerIdVeryLong, "'customerId' must not be null");
+
+    return cartRepository
+        .findByCustomerId(customerIdVeryLong)
+        .orElseGet(() -> new Cart(customerIdVeryLong));
+  }
+}
+
+----
+
+Remember that the calculation of the total number of products and the total price was earlier implemented in the Cart model class.
+
+Sidenote
+In order to get mokito to work with Java 21, I had to include the latest dependency to bytebuddy
+
+[,xml]
+----
+<dependency>
+    <groupId>net.bytebuddy</groupId>
+    <artifactId>byte-buddy</artifactId>
+    <version>1.15.11</version>
+    <scope>test</scope>
+</dependency>
+
+----
