@@ -1,0 +1,98 @@
+:source-highlighter: highlight.js
+
+The use case defines that a customer should be able to add a product with a certain quantity to the shopping cart.
+
+First we define the in port AddToCartUseCase
+[,java]
+----
+public interface AddToCartUseCase {
+
+  Cart addToCart(CustomerId customerId, ProductId productId, int quantity)
+      throws ProductNotFoundException, NotEnoughItemsInStockException; <1>
+}
+
+----
+<1> The only method of the interface defines two exceptions.  We have already defined ProductNotFoundException in the model module. The second, NotEnoughItemsInStockException, is defined in the application module, in the same package as the port.  This is because if a product exists in determined in the application module when the service access the repository.
+
+The source is trivial
+[,java]
+----
+public class ProductNotFoundException extends Exception {}
+
+----
+
+Next we discuss the implementation of the class AddToCartService.
+
+The addToCart method first validates the input parameters, loads the product and shopping cart from repositories, or creates a new shopping cart, adds the product to the shopping cart in the desired quantity, and saves the shopping cart again.
+
+[,java]
+----
+public class AddToCartService implements AddToCartUseCase {
+
+  private final CartRepository cartRepository;
+  private final ProductRepository productRepository;
+
+  public AddToCartService(
+      CartRepository cartRepository, ProductRepository productRepositoryVeryVeryLong) { <1>
+    this.cartRepository = cartRepository;
+    this.productRepository = productRepositoryVeryVeryLong;
+  }
+
+  @Override
+  public Cart addToCart(CustomerId customerIdVeryVeryLong, ProductId productId, int quantity)
+      throws ProductNotFoundException, NotEnoughItemsInStockException {
+    Objects.requireNonNull(customerIdVeryVeryLong, "'customerId' must not be null");
+    Objects.requireNonNull(productId, "'productId' must not be null");
+    if (quantity < 1) {
+      throw new IllegalArgumentException("'quantity' must be greater than 0");
+    }
+
+    Product product =
+        productRepository.findById(productId).orElseThrow(ProductNotFoundException::new);
+
+    Cart cart =
+        cartRepository
+            .findByCustomerId(customerIdVeryVeryLong)
+            .orElseGet(() -> new Cart(customerIdVeryVeryLong));
+
+    cart.addProduct(product, quantity);
+
+    cartRepository.save(cart);
+
+    return cart;
+  }
+}
+
+
+
+----
+<1> In this service we inject the two repositories, also known as secondary ports.
+
+Next we enhance the ProductRepository with two methods.  findById to load a concrete product and the method save, which we use later to create test products 
+
+[,java]
+----
+public interface ProductRepository {
+  void save(Product product);
+
+  Optional<Product> findById(ProductId productId);
+
+  List<Product> findByNameOrDescription(String query);
+}
+
+----
+
+The newly provided CartRepository has two to store and load the cart.  The methods are called save and findByCustomerId.
+
+[,java]
+----
+public interface CartRepository {
+
+  void save(Cart cart);
+
+  Optional<Cart> findByCustomerId(CustomerId customerId);
+
+  
+}
+
+----
