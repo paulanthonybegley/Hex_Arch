@@ -1,0 +1,30 @@
+In this code excursion the aim is to implement a simple project using DDD and TDD within the hexagonal architecture.
+
+The use cases to cover are:
+
+1. Searching for products
+2. Adding a product to the shopping cart
+3. Retrieving the shopping cart with the products, their respective quantity and total price
+4. Emptying the shopping cart.
+
+The business logic will unsure:
+
+* The amount of product added to the cart must be at least one
+* After adding a product then the total quantity for that product must not exceed the availability within the warehouse.
+
+The technologies to be used:
+
+* Java 17, without any frameworks.  In the future, Spring and Quarkus will be integrated.
+* RestEasy as an implementation of jakarta RESTFUL web services, formerly JAX-RS.
+* Undertow as lightweight web server.
+* ArchUnit to verify compliance with architectural boundaries
+* Lombok to save some boilerplate code.
+
+It will follow a test-driven approach:
+
+* For each domain entity, we will write a unit test
+* For each domain service, we will write a unit test
+* For each adapter, we will write an integration test
+* For critical use cases, we will write end-to-end tests.
+
+We will alo integrate CI/CD tool "Github Actions" to build project on GitHub and perform static code analysis.
