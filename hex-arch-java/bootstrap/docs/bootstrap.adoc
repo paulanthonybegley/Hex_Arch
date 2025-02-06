@@ -1,0 +1,124 @@
+:source-highlighter: highlight.js
+
+The sections of the orchestra are ready; adapters, model and application.  Where is the conductor to bring it all together: this bootstrap module is it.
+
+First, we need to define a few dependencies – one to the adapter module and two more to Undertow and the RESTEasy JSON module (both of which you already know from the adapter integration tests).
+
+To do this, enter the following into the bootstrap module’s pom.xml:
+
+[,xml]
+----
+          <dependency>
+            <groupId>com.example.shop</groupId>
+            <artifactId>adapter</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+                <!-- External -->
+        <dependency>
+            <groupId>org.jboss.resteasy</groupId>
+            <artifactId>resteasy-undertow</artifactId>
+            <version>6.2.5.Final</version>
+        </dependency>
+
+        <!-- Runtime -->
+        <dependency>
+            <groupId>org.jboss.resteasy</groupId>
+            <artifactId>resteasy-jackson2-provider</artifactId><!-- Required at runtime to (de)serialize JSON -->
+            <version>6.2.5.Final</version>
+            <scope>runtime</scope>
+        </dependency>
+----
+
+Next, as in the REST adapter integration test, we need to extend the Application class. Instead of an anonymous inner class, we use a regular class this time because we need to initialize and wire more objects than in the tests:
+* The starting point is the overwritten getSingletons() method. This method first calls initPersistenceAdapters() to initialize the in-memory repositories.
+* Then the four controllers are initialized, and one service per controller.
+* The four controllers are then returned in a Set; the Undertow web server does the rest.
+
+The code for the RestEasyUndertowShopApplication follow:
+
+[,java]
+----
+import com.example.shop.adapter.in.rest.product.FindProductsController;
+import com.example.shop.adapter.out.persistence.inmemory.InMemoryProductRepository;
+import com.example.shop.application.port.in.product.FindProductsUseCase;
+import com.example.shop.application.port.out.persistence.ProductRepository;
+import com.example.shop.application.service.product.FindProductsService;
+import jakarta.ws.rs.core.Application;
+import java.util.Set;
+
+/**
+ * The application configuration for the Undertow server. Instantiates the adapters and use cases,
+ * and wires them.
+ *
+ * @author Paul Anthony Begley
+ */
+public class RestEasyUndertowShopApplication extends Application {
+
+ 
+  private ProductRepository productRepository;
+
+  // We're encouraged to use "automatic discovery of resources", but I want to define them manually.
+  @SuppressWarnings("deprecation")
+  @Override
+  public Set<Object> getSingletons() {
+    initPersistenceAdapters();
+    return Set.of(
+
+        findProductsController());
+  }
+
+  private void initPersistenceAdapters() {
+    
+    productRepository = new InMemoryProductRepository();
+  }
+
+
+
+
+
+
+
+  private FindProductsController findProductsController() {
+    FindProductsUseCase findProductsUseCase = new FindProductsService(productRepository);
+    return new FindProductsController(findProductsUseCase);
+  }
+}
+
+----
+
+We need a main method to start the application and the Undertow server.  Two extra methods exist to help with End-To-End testing; these startOnPort and stop.
+
+[,java]
+----
+import org.jboss.resteasy.plugins.server.undertow.UndertowJaxrsServer;
+
+/**
+ * Launcher for the application: starts the Undertow server and deploys the shop application.
+ *
+ * @author Paul Anthony Begley
+ */
+public class Launcher {
+
+  private static final int PORT = 8080;
+
+  private UndertowJaxrsServer server;
+
+  public static void main(String[] args) {
+    new Launcher().startOnPort(PORT);
+  }
+
+  public void startOnPort(int port) {
+    server = new UndertowJaxrsServer().setPort(port);
+    startServer();
+  }
+
+  private void startServer() {
+    server.start();
+    server.deploy(RestEasyUndertowShopApplication.class);
+  }
+
+  public void stop() {
+    server.stop();
+  }
+}
+----
