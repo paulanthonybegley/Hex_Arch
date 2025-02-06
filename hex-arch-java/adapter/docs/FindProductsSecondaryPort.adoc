@@ -1,0 +1,244 @@
+:source-highlighter: highlight.js
+
+To get an initial feel for how the application will run, we will implement an inmemory datastore, not database required yet.  here we are taking advantage of the benefits of using the hexagonal architecture: the decision concerning technical details, such as the database, can be postponed and easily replaced later.
+
+We will implement the secondary port ProductRepository through the InMemoryProductRepository class.
+
+[,java]
+----
+import com.example.shop.adapter.out.persistence.DemoProducts;
+import com.example.shop.application.port.out.persistence.ProductRepository;
+import com.example.shop.model.product.Product;
+import com.example.shop.model.product.ProductId;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+
+/**
+ * Persistence adapter: Stores products in memory.
+ *
+ * @author Paul Anthony Begley
+ */
+public class InMemoryProductRepository implements ProductRepository {
+
+  private final Map<ProductId, Product> products = new ConcurrentHashMap<>();
+
+  public InMemoryProductRepository() {
+    createDemoProducts();
+  }
+
+  private void createDemoProducts() {
+    DemoProducts.DEMO_PRODUCTS.forEach(this::save);
+  }
+
+  @Override
+  public void save(Product product) {
+    products.put(product.id(), product);
+  }
+
+  @Override
+  public Optional<Product> findById(ProductId productId) {
+    return Optional.ofNullable(products.get(productId));
+  }
+
+  @Override
+  public List<Product> findByNameOrDescription(String query) {
+    String queryLowerCase = query.toLowerCase(Locale.ROOT);
+    return products.values().stream()
+        .filter(product -> matchesQuery(product, queryLowerCase))
+        .toList();
+  }
+
+  private boolean matchesQuery(Product product, String query) {
+    return product.name().toLowerCase(Locale.ROOT).contains(query)
+        || product.description().toLowerCase(Locale.ROOT).contains(query);
+  }
+}
+
+----
+
+Initially we create some demo products in the repository's constructor.  To enable this, we pass each product listed in DemoProducts class to the save method.
+
+[,java]
+----
+public final class DemoProducts {
+
+  private static final Currency EUR = Currency.getInstance("EUR");
+
+  public static final Product PLASTIC_SHEETING =
+      new Product(
+          new ProductId("TTKQ8NJZ"),
+          "Plastic Sheeting",
+          "Clear plastic sheeting, tear-resistant, tough, and durable",
+          Money.of(EUR, 42, 99),
+          55);
+
+  public static final Product COMPUTER_MONITOR =
+      new Product(
+          new ProductId("K3SR7PBX"),
+          "27-Inch Curved Computer Monitor",
+          "Enjoy big, bold and stunning panoramic views",
+          Money.of(EUR, 159, 99),
+          24_081);
+  public static final Product MONITOR_DESK_MOUNT =
+      new Product(
+          new ProductId("Q3W43CNC"),
+          "Dual Monitor Desk Mount",
+          "Ultra wide and longer arm fits most monitors",
+          Money.of(EUR, 119, 90),
+          1_079);
+
+  public static final Product LED_LIGHTS =
+      new Product(
+          new ProductId("WM3BPG3E"),
+          "50ft Led Lights",
+          "Enough lights to decorate an entire room",
+          Money.of(EUR, 11, 69),
+          3_299);
+
+  public static final List<Product> DEMO_PRODUCTS =
+      List.of(PLASTIC_SHEETING, COMPUTER_MONITOR, MONITOR_DESK_MOUNT, LED_LIGHTS);
+
+  private DemoProducts() {}
+}
+----
+
+[,java]
+----
+public class InMemoryProductRepository implements ProductRepository {
+
+  private final Map<ProductId, Product> products = new ConcurrentHashMap<>();
+
+  public InMemoryProductRepository() {
+    createDemoProducts();
+  }
+
+  private void createDemoProducts() {
+    DemoProducts.DEMO_PRODUCTS.forEach(this::save);
+  }
+
+  @Override
+  public void save(Product product) {
+    products.put(product.id(), product);
+  }
+
+  @Override
+  public Optional<Product> findById(ProductId productId) {
+    return Optional.ofNullable(products.get(productId));
+  }
+
+  @Override
+  public List<Product> findByNameOrDescription(String query) {
+    String queryLowerCase = query.toLowerCase(Locale.ROOT);
+    return products.values().stream()
+        .filter(product -> matchesQuery(product, queryLowerCase))
+        .toList();
+  }
+
+  private boolean matchesQuery(Product product, String query) {
+    return product.name().toLowerCase(Locale.ROOT).contains(query)
+        || product.description().toLowerCase(Locale.ROOT).contains(query);
+  }
+}
+----
+
+The repository is responsible for saving, loading and searching for products.  Searching is implemented using the findByNameOrDescription method by iterating over all stored products and checking whether their name or description contains the search term.
+
+As our persistence adapters do not communicate with any external sources like database then we can utilize unit test.
+
+Later we will be implementing a JPA adapter, which mandates testing the same functionality with two different adapters, we write the tests each in an abstract class and extend that by a concrete class that creates the respective adapter to be tested.
+
+TODO: Insert uml diagram.
+
+The abstract class AbstractProductRepositoryTest contains an instance of ProductRepository, which is instantiated via the abstract method createProductRepository.  All the tests will be executed on this instance.
+
+In the concrete class InMemoryProductRepositoryTest the method createProductRepository is implemented and return the concrete adapter InMemoryProductRepository to be tested.
+
+With the strategy then as new persistence adapters like for JPA are implemented then we can run the tests on all adapter implementations without having to write the tests twice.
+
+The AbstractProductRepositoryTest is defined below.  In the upper part is the initialization of the repository using the abstract method createProductRepository.
+
+The actual test method calls the ProductRepository.findByNameOrDescription method.  It then checks if the expected product, the test products matching the search term, are returned.
+
+[,java]
+----
+public abstract class AbstractProductRepositoryTest<T extends ProductRepository> {
+
+  private T productRepository;
+
+  @BeforeEach
+  void initRepository() {
+    productRepository = createProductRepository();
+  }
+
+  protected abstract T createProductRepository();
+
+  @Test
+  void givenTestProductsAndATestProductId_findById_returnsATestProduct() {
+    ProductId productId = DemoProducts.COMPUTER_MONITOR.id();
+
+    Optional<Product> product = productRepository.findById(productId);
+
+    assertThat(product).contains(DemoProducts.COMPUTER_MONITOR);
+  }
+
+  @Test
+  void givenTheIdOfAProductNotPersisted_findById_returnsAnEmptyOptional() {
+    ProductId productId = new ProductId("00000");
+
+    Optional<Product> product = productRepository.findById(productId);
+
+    assertThat(product).isEmpty();
+  }
+
+  @Test
+  void
+      givenTestProductsAndASearchQueryNotMatchingAndProduct_findByNameOrDescription_returnsAnEmptyList() {
+    String query = "not matching any product";
+
+    List<Product> products = productRepository.findByNameOrDescription(query);
+
+    assertThat(products).isEmpty();
+  }
+
+  @Test
+  void
+      givenTestProductsAndASearchQueryMatchingOneProduct_findByNameOrDescription_returnsThatProduct() {
+    String query = "lights";
+
+    List<Product> products = productRepository.findByNameOrDescription(query);
+
+    assertThat(products).containsExactlyInAnyOrder(DemoProducts.LED_LIGHTS);
+  }
+
+  @Test
+  void
+      givenTestProductsAndASearchQueryMatchingTwoProducts_findByNameOrDescription_returnsThoseProducts() {
+    String query = "monitor";
+
+    List<Product> products = productRepository.findByNameOrDescription(query);
+
+    assertThat(products)
+        .containsExactlyInAnyOrder(DemoProducts.COMPUTER_MONITOR, DemoProducts.MONITOR_DESK_MOUNT);
+  }
+}
+----
+
+The concrete test class InMemoryProductRepositoryTest implements only the createProductRepository method.
+
+[,java]
+----
+import com.example.shop.adapter.out.persistence.AbstractProductRepositoryTest;
+
+class InMemoryProductRepositoryTest
+    extends AbstractProductRepositoryTest<InMemoryProductRepository> {
+
+  @Override
+  protected InMemoryProductRepository createProductRepository() {
+    return new InMemoryProductRepository();
+  }
+}
+----
+
