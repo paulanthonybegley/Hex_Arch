@@ -1,0 +1,357 @@
+:source-highlighter: highlight.js
+:highlightjs-languages: bash, http
+
+We have to accept new dependencies to assist writing our REST adapter, relieving us needing to write services from scratch.
+
+We add the following dependencies:
+
+[,xml]
+----
+  <dependencies>
+          <!-- Internal -->
+        <dependency>
+            <groupId>com.example.shop</groupId>
+            <artifactId>application</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <!-- External -->
+        <dependency>
+            <groupId>jakarta.ws.rs</groupId>
+            <artifactId>jakarta.ws.rs-api</artifactId>
+            <version>3.1.0</version>
+        </dependency>
+    
+  </dependencies>
+
+----
+
+The implementation of the REST inward Adapter for product search in FindProductsController.  This controller must call the FindProductsUseCase, the primary port, so it is injected in the constructor.
+
+[,java]
+----
+@Path("/products")
+@Produces(MediaType.APPLICATION_JSON)
+public class FindProductsController {
+
+  private final FindProductsUseCase findProductsUseCase;
+
+  public FindProductsController(FindProductsUseCase findProductsUseCase) {
+    this.findProductsUseCase = findProductsUseCase;
+  }
+
+  @GET
+  public List<ProductInListWebModel> findProducts(@QueryParam("query") String query) {
+    if (query == null) {
+      throw clientErrorException(Response.Status.BAD_REQUEST, "Missing 'query'");
+    }
+
+    List<Product> products;
+
+    try {
+      products = findProductsUseCase.findByNameOrDescription(query);
+    } catch (IllegalArgumentException e) {
+      throw clientErrorException(Response.Status.BAD_REQUEST, "Invalid 'query'");
+    }
+
+    return products.stream().map(ProductInListWebModel::fromDomainModel).toList(); <1>
+  }
+}
+
+----
+<1> This line is executed if the IllegalArgument exception is not thrown.
+
+The findProduct method loads the products using the findByNameOrDescription method of the FindProductsUseCase port.  If the search term is too short then it throws an IllegalArguments exception.
+
+
+This exception is caught and a ClientErrorException, which is created using the helper method clientErrorException implemented in the ControllerCommons class.
+
+[,java]
+----
+public final class ControllerCommons {
+
+  private ControllerCommons() {}
+
+  public static ClientErrorException clientErrorException(Response.Status status, String message) {
+    return new ClientErrorException(errorResponse(status, message));
+  }
+
+  public static Response errorResponse(Response.Status status, String message) {
+    ErrorEntity errorEntity = new ErrorEntity(status.getStatusCode(), message);
+    return Response.status(status).entity(errorEntity).build();
+  }
+}
+
+----
+
+The ClientErrorException is defined by the “Jakarta RESTful Web Services” API. When a controller method throws this exception, the controller returns an HTTP error code, and the ErrorEntity passed to the exception as a JSON string.
+
+ErrorEntity is a simple record:
+[,java]
+----
+public record ErrorEntity(int httpStatus, String errorMessage) {}
+
+----
+The error message would later look like this in case of an invalid call via curl, for example:
+
+[,bash]
+----
+$ curl http://localhost:8081/products?query=x -i
+HTTP/1.1 400 Bad Request
+[...]
+
+{"httpStatus":400,"errorMessage":"Invalid 'query'"}
+
+----
+
+
+The method invocation FindProductsUseCase.findByNameOrDescription returns a list of Product entities, which is defined in the model module.
+
+To prevent Domain specific attributes leaking out to client, we map this model Product type to an Adapter specific Type ProductInListWebModel, which enables use to control which attributes clients can see.  This is implemented as a record and contains a static factory method fromDomainModel, which is passed above as a method reference to the stream.map method.
+
+[,java]
+----
+public record ProductInListWebModel(String id, String name, Money price, int itemsInStock) {
+
+  public static ProductInListWebModel fromDomainModel(Product product) {
+    return new ProductInListWebModel(
+        product.id().value(), product.name(), product.price(), product.itemsInStock());
+  }
+}
+
+----
+
+This controller is complete.  When the RESTEasy and Undertow part is complete then we can access this controller via the following url when the application is complete.
+
+[,http]
+----
+http://localhost:8081/products/?query=monitor
+
+----
+
+When this url is accessed then the repexted response will be:
+
+[,json]
+----
+[
+  {
+    "id": "K3SR7PBX",
+    "name": "27-Inch Curved Computer Monitor",
+    "price": {
+      "currency": "EUR",
+      "amount": 159.99
+    },
+    "itemsInStock": 24081
+  },
+  {
+    "id": "Q3W43CNC",
+    "name": "Dual Monitor Desk Mount",
+    "price": {
+      "currency": "EUR",
+      "amount": 119.9
+    },
+    "itemsInStock": 1079
+  }
+]
+
+----
+
+The REST adapter is ready.
+
+We could implement unit tests for our adapters but it is risky.  Imagine the process to set up scaffolding for instantiating an AddToCartController with a mocked AddToCartUseCase and then checking that a call to addLineItem is forwarded correctly to addToCatUseCase.addToCart.
+
+This relies on all annotations being correct, we later configure RESTEasy and Undertow correctly, and that a JSON serializer is on the classpath.
+
+To ensure the adapters work correctly, we will write an integration test and start a web server and invoke the controllers over http.
+
+We nee to add a few more dependencies:
+
+* rest-easy-undertow - the Undertow web server combined with the RESTEasy library
+* resteasy-jackson2-provider - a RESTEasy module for converting java objects to JSON, and vice versa.
+* rest-assured - a library that allows us to make HTTP calls from integration tests.
+
+The dependencies will be added to the maven pom of the adapter module.
+
+[,xml]
+----
+<dependency>
+    <groupId>io.rest-assured</groupId>
+    <artifactId>rest-assured</artifactId>
+    <version>5.3.2</version>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.jboss.resteasy</groupId>
+    <artifactId>resteasy-jackson2-provider</artifactId>
+    <version>6.2.5.Final</version>
+    <scope>test</scope>
+</dependency>
+<dependency>
+    <groupId>org.jboss.resteasy</groupId>
+    <artifactId>resteasy-undertow</artifactId>
+    <version>6.2.5.Final</version>
+    <scope>test</scope>
+</dependency>
+----
+
+We add a dependency on the "Attached Test Jar" of the model module to be able to access the test factories implemented the, like TestProductFactory.createTestProduct.
+
+
+
+[,xml]
+----
+<dependency>
+    <groupId>com.example.shop</groupId>
+    <artifactId>model</artifactId>
+    <version>${project.version}</version>
+    <classifier>tests</classifier>
+    <type>test-jar</type>
+    <scope>test</scope>
+</dependency>
+----
+
+We will now implement integration tests for this adapter.
+
+Below is a snippet from the ProductsControllerTest class.
+
+[,java]
+----
+class ProductsControllerTest {
+
+  private static final Product TEST_PRODUCT_1 = createTestProduct(euros(19, 99));
+  private static final Product TEST_PRODUCT_2 = createTestProduct(euros(25, 99)); <1>
+
+  private static final FindProductsUseCase findProductsUseCase = mock(FindProductsUseCase.class); <2>
+
+  private static UndertowJaxrsServer server;
+
+  @BeforeAll
+  static void init() { <3>
+    server =
+        new UndertowJaxrsServer()
+            .setPort(TEST_PORT)
+            .start()
+            .deploy(
+                new Application() {
+                  @Override
+                  public Set<Object> getSingletons() {
+                    return Set.of(new FindProductsController(findProductsUseCase));
+                  }
+                });
+  }
+
+  @AfterAll
+  static void stop() { <4>
+    server.stop();
+  }
+
+  @BeforeEach
+  void resetMocks() {
+    Mockito.reset(findProductsUseCase);
+  }
+
+  @Test
+  void givenAQueryAndAListOfProducts_findProducts_requestsProductsViaQueryAndReturnsThem() { <5>
+    String query = "foo";
+    List<Product> productList = List.of(TEST_PRODUCT_1, TEST_PRODUCT_2);
+
+    when(findProductsUseCase.findByNameOrDescription(query)).thenReturn(productList);
+
+    Response response =
+        given()
+            .port(TEST_PORT)
+            .queryParam("query", query)
+            .get("/products")
+            .then()
+            .extract()
+            .response();
+
+    assertThatResponseIsProductList(response, productList);
+  }
+
+  @Test
+  void givenANullQuery_findProducts_returnsError() {
+    Response response = given().port(TEST_PORT).get("/products").then().extract().response();
+
+    assertThatResponseIsError(response, BAD_REQUEST, "Missing 'query'");
+  }
+
+  @Test
+  void givenATooShortQuery_findProducts_returnsError() {
+    String query = "e";
+    when(findProductsUseCase.findByNameOrDescription(query))
+        .thenThrow(IllegalArgumentException.class);
+
+    Response response =
+        given()
+            .port(TEST_PORT)
+            .queryParam("query", query)
+            .get("/products")
+            .then()
+            .extract()
+            .response();
+
+    assertThatResponseIsError(response, BAD_REQUEST, "Invalid 'query'");
+  }
+}
+----
+<1> We create test data
+<2> We create test doubles
+<3> This is annotated with the @BeforeAll and here we configure our server with a constant port which is defined in the HttpTestCommons class.  We start the server and deploy our test application.  To enable this we pass in an instance of an anonymous inner class to the deploy method.  This class extends jakarta.ws.rs.core.Application and overrides its getSingletons method, returning a set of all REST controllers to which we inject the test double for the ports.
+<4> This method is annotated with @AfterAll and shuts down the server.
+<5> First we create a query and a product list.  Then we define via Mockito.when that the  findProductsUseCase.findByNameOrDescription method should return our product list when given our query. Next we use REST Assured library to send an actual HTTP call to the server with the query parameter.  Using assertThatResponseIsProductList , we check if the HTTP call returned the expected Product List in JSON format.  This method is defined in the class ProductsControllerAssertions, see below for implementation.
+
+[,java]
+----
+import static jakarta.ws.rs.core.Response.Status.OK;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.example.shop.model.product.Product;
+import io.restassured.path.json.JsonPath;
+import io.restassured.response.Response;
+import java.util.List;
+
+public final class ProductsControllerAssertions {
+
+  private ProductsControllerAssertions() {}
+
+  public static void assertThatResponseIsProduct(Response response, Product product) {
+    assertThat(response.statusCode()).isEqualTo(OK.getStatusCode());
+
+    JsonPath json = response.jsonPath();
+
+    assertThatJsonProductMatchesProduct(json, true, "", product);
+  }
+
+  public static void assertThatResponseIsProductList(Response response, List<Product> products) {
+    assertThat(response.statusCode()).isEqualTo(OK.getStatusCode());
+
+    JsonPath json = response.jsonPath();
+
+    for (int i = 0; i < products.size(); i++) {
+      String prefix = "[%d].".formatted(i);
+      Product product = products.get(i);
+      assertThatJsonProductMatchesProduct(json, false, prefix, product);
+    }
+  }
+
+  static void assertThatJsonProductMatchesProduct(
+      JsonPath json, boolean jsonHasDescription, String prefix, Product product) {
+    assertThat(json.getString(prefix + "id")).isEqualTo(product.id().value());
+    assertThat(json.getString(prefix + "name")).isEqualTo(product.name());
+
+    if (jsonHasDescription) {
+      assertThat(json.getString(prefix + "description")).isEqualTo(product.description());
+    } else {
+      assertThat(json.getString(prefix + "description")).isNull();
+    }
+
+    assertThat(json.getString(prefix + "price.currency"))
+        .isEqualTo(product.price().currency().getCurrencyCode());
+    assertThat(json.getDouble(prefix + "price.amount"))
+        .isEqualTo(product.price().amount().doubleValue());
+
+    assertThat(json.getInt(prefix + "itemsInStock")).isEqualTo(product.itemsInStock());
+  }
+}
+----
